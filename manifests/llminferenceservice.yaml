@@ -1,0 +1,57 @@
+# LLMInferenceService (llm-d) using the rebuilt community vLLM image.
+#
+# Only the image is overridden. command/args, --port 8000, the TLS cert/key from
+# /var/run/kserve/tls, probes and $VLLM_ADDITIONAL_ARGS handling all come from
+# the platform's default config, so the community image behaves like the
+# Red Hat one. Do not add a "command:" unless you need full control.
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: qwen3-community-vllm
+  namespace: <my_namespace>
+spec:
+  replicas: 1
+  model:
+    uri: hf://Qwen/Qwen3-0.6B
+    name: Qwen/Qwen3-0.6B
+  router:
+    route: {}
+    gateway: {}
+    scheduler: {}
+  template:
+    containers:
+      - name: main
+        image: quay.io/<org>/vllm-openai-ocp:<tag>
+        env:
+          - name: VLLM_ADDITIONAL_ARGS
+            value: >-
+              --max-model-len=8192
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          limits:
+            cpu: "4"
+            memory: 32Gi
+            nvidia.com/gpu: "1"
+          requests:
+            cpu: "2"
+            memory: 16Gi
+            nvidia.com/gpu: "1"
+  # --- Prefill/decode disaggregation -------------------------------------
+  # Set the same image on BOTH pools, and build with REQUIRE_NIXL=true.
+  # Decode (spec.template) then uses kv_role "kv_consumer"; prefill uses "kv_producer".
+  # prefill:
+  #   replicas: 1
+  #   template:
+  #     containers:
+  #       - name: main
+  #         image: quay.io/<org>/vllm-openai-ocp:<tag>
+  #         env:
+  #           - name: VLLM_ADDITIONAL_ARGS
+  #             value: >-
+  #               --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}'

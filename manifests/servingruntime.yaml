@@ -1,0 +1,53 @@
+# Custom ServingRuntime for RHOAI (single-model / KServe RawDeployment or Serverless).
+# Apply in the model's project, or add via Settings > Serving runtimes in the dashboard
+# (drop metadata.namespace there). Replace the image with your rebuilt, pinned tag/digest.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-community-runtime
+  annotations:
+    openshift.io/display-name: vLLM Community (OCP-ready) ServingRuntime for KServe
+    opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    opendatahub.io/apiProtocol: REST
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/<org>/vllm-openai-ocp:<tag>
+      # No "command:" — keep the image ENTRYPOINT so the passwd fix runs.
+      # Flags-only args are routed to vllm.entrypoints.openai.api_server.
+      args:
+        - --port=8080
+        - --model=/mnt/models
+        - --served-model-name={{.Name}}
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+        - name: HF_HUB_OFFLINE
+          value: "1"
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
+  volumes:
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
