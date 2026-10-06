@@ -61,10 +61,25 @@ ENV VLLM_NO_USAGE_STATS=1 \
 COPY --chmod=0755 ocp-entrypoint.sh /usr/local/bin/ocp-entrypoint.sh
 
 RUN set -eux; \
-    # Non-root default user, primary group root (OpenShift convention).
-    if ! id -u 1001 >/dev/null 2>&1; then \
+    # Non-root user 1001, primary group 0 (OpenShift convention).
+    # Recent upstream images already ship a "vllm" user with another UID, so
+    # reuse it and move it to 1001 instead of failing on useradd.
+    if id -u vllm >/dev/null 2>&1; then \
+        old_uid="$(id -u vllm)"; \
+        if [ "${old_uid}" != "1001" ]; then \
+            if getent passwd 1001 >/dev/null; then \
+                echo "UID 1001 is taken by $(getent passwd 1001 | cut -d: -f1)" >&2; exit 1; \
+            fi; \
+            usermod -u 1001 vllm; \
+            find / -xdev -user "${old_uid}" -exec chown -h 1001 {} + 2>/dev/null || true; \
+        fi; \
+        usermod -g 0 -d "${HOME}" vllm; \
+    elif getent passwd 1001 >/dev/null; then \
+        usermod -g 0 -d "${HOME}" "$(getent passwd 1001 | cut -d: -f1)"; \
+    else \
         useradd -u 1001 -g 0 -d "${HOME}" -M -s /sbin/nologin -c "vLLM" vllm; \
     fi; \
+    id vllm || id 1001; \
     mkdir -p "${HOME}" "${HF_HOME}" "${VLLM_CACHE_ROOT}" "${VLLM_CONFIG_ROOT}" \
              "${TRITON_CACHE_DIR}" "${TORCHINDUCTOR_CACHE_DIR}" "${NUMBA_CACHE_DIR}" \
              "${OUTLINES_CACHE_DIR}" "${HOME}/.cache/flashinfer" /mnt/models /workspace; \
